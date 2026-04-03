@@ -1785,6 +1785,93 @@
                 });
         }
 
+        // ==================== USERNAME SETUP MODAL (global scope) ====================
+        function showUsernameSetupModal(user) {
+            _debug('showUsernameSetupModal: showing modal for ' + user.email);
+            // Remove any existing modal
+            var existing = document.getElementById('googleUsernameModal');
+            if (existing) existing.remove();
+
+            var modal = document.createElement('div');
+            modal.id = 'googleUsernameModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+            var emailText = user.email ? '<div style="font-size:12px;color:#8e8e93;margin-bottom:12px;">' + user.email + '</div>' : '';
+            var photoHtml = user.photoURL ? '<img src="' + user.photoURL + '" style="width:64px;height:64px;border-radius:50%;margin:0 auto 12px;display:block;">' : '<div style="font-size:48px;margin-bottom:12px;">🎮</div>';
+
+            modal.innerHTML = '<div style="background:#1a1a1a;border-radius:20px;padding:24px;max-width:320px;width:100%;border:1px solid #333;text-align:center;">' +
+                photoHtml +
+                '<div style="font-size:22px;font-weight:700;margin-bottom:8px;">Welcome!</div>' +
+                '<div style="font-size:13px;color:#8e8e93;margin-bottom:16px;">Choose your username</div>' +
+                emailText +
+                '<input type="text" id="googleUsernameInput" placeholder="Enter username..." maxlength="20" style="width:100%;padding:16px 20px;border:1px solid #333;border-radius:12px;background:#000;color:#fff;font-size:17px;margin-bottom:16px;outline:none;box-sizing:border-box;">' +
+                '<button id="googleUsernameBtn" style="width:100%;padding:16px;border:none;border-radius:12px;background:linear-gradient(135deg,#007AFF,#bf5af2);color:white;font-size:17px;font-weight:600;cursor:pointer;">🚀 Start Playing</button>' +
+                '<div id="googleUsernameError" style="font-size:12px;color:#ff453a;margin-top:8px;min-height:18px;"></div>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            setTimeout(function() {
+                var inp = document.getElementById('googleUsernameInput');
+                if (inp) inp.focus();
+            }, 300);
+
+            // Wire up the submit button
+            document.getElementById('googleUsernameBtn').addEventListener('click', function() {
+                var input = document.getElementById('googleUsernameInput');
+                var btn = document.getElementById('googleUsernameBtn');
+                var errEl = document.getElementById('googleUsernameError');
+                if (!input) return;
+                var username = input.value.trim();
+                if (!username || username.length < 2) {
+                    if (errEl) errEl.textContent = 'Username must be at least 2 characters';
+                    return;
+                }
+                if (username.length > 20) {
+                    if (errEl) errEl.textContent = 'Username too long (max 20 chars)';
+                    return;
+                }
+                if (btn) { btn.disabled = true; btn.textContent = 'Setting up...'; }
+                if (errEl) errEl.textContent = '';
+
+                db.ref('usernames/' + username.toLowerCase()).once('value').then(function(snap) {
+                    if (snap.exists()) {
+                        if (btn) { btn.disabled = false; btn.textContent = '🚀 Start Playing'; }
+                        if (errEl) errEl.textContent = 'Username already taken! Try another.';
+                        return;
+                    }
+                    var profile = {
+                        username: username, loginProvider: 'google',
+                        email: (currentUser ? currentUser.email : '') || '',
+                        createdAt: Date.now(), lastLogin: Date.now(), totalTests: 0,
+                        unlockedThemes: ['default', 'blue_pro', 'dark_mode', 'neon_glow'],
+                        unlockedAvatars: ['default'], currentTheme: 'default', currentAvatar: 'default',
+                        bestTimes: { easy: null, medium: null, hard: null, extreme: null },
+                        averageTime: 0, achievements: [], testHistory: [], xp: 0,
+                        streak: 0, perfectStreak: 0, modesPlayed: []
+                    };
+                    userProfile = profile;
+                    localStorage.setItem('mathsYorkerUserData', JSON.stringify(profile));
+                    db.ref('users/' + currentUserId).set(profile);
+                    db.ref('usernames/' + username.toLowerCase()).set({ uid: currentUserId, username: username, lastActive: Date.now() });
+                    modal.remove();
+                    showMainApp();
+                    if (typeof showToast === 'function') showToast('Welcome, ' + username + '! 🎉', 'success');
+                    _debug('Username "' + username + '" saved! Showing main app');
+                }).catch(function(err) {
+                    if (btn) { btn.disabled = false; btn.textContent = '🚀 Start Playing'; }
+                    if (errEl) errEl.textContent = 'Error: ' + err.message;
+                });
+            });
+
+            // Also submit on Enter key
+            document.getElementById('googleUsernameInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') document.getElementById('googleUsernameBtn').click();
+            });
+        }
+
+        // Also make it global for IIFE code
+        window._showUsernameSetupModal = showUsernameSetupModal;
+
         function loadUserProfile(uid) {
             _debug('loadUserProfile: reading DB for uid=' + uid);
             db.ref('users/' + uid).once('value').then((snapshot) => {
@@ -1813,7 +1900,7 @@
                         // New Google user — show username setup modal
                         _debug('loadUserProfile: NEW Google user! Showing username modal');
                         _resetGoogleBtn();
-                        _showUsernameSetupModal(user);
+                        showUsernameSetupModal(user);
                     } else {
                         // Anonymous user with no data — show auth screen
                         _debug('loadUserProfile: Not Google user, showing auth screen');
@@ -1830,7 +1917,7 @@
                 });
                 if (isGoogle) {
                     _debug('loadUserProfile: DB error but user is Google, showing username modal anyway');
-                    _showUsernameSetupModal(user);
+                    showUsernameSetupModal(user);
                 } else {
                     showAuthScreen();
                 }
@@ -4482,7 +4569,7 @@
 .v6-copied-text { font-size:12px; color:var(--success); text-align:center; min-height:18px; margin-bottom:6px; }\
 \
 /* ===== USERNAME SETUP MODAL ===== */\
-.v6-username-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:7500; display:flex; align-items:center; justify-content:center; padding:20px; }\
+.v6-username-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:15000; display:flex; align-items:center; justify-content:center; padding:20px; }\
 .v6-username-card { background:var(--bg-surface); border-radius:20px; padding:24px; max-width:320px; width:100%; border:1px solid var(--border); text-align:center; }\
 .v6-username-title { font-size:22px; font-weight:700; margin-bottom:8px; }\
 .v6-username-sub { font-size:13px; color:var(--text-secondary); margin-bottom:16px; }\
