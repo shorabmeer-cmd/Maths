@@ -1182,7 +1182,6 @@
             <input type="text" class="auth-input" id="usernameInput" placeholder="Enter your name" maxlength="20">
             <button class="auth-btn secondary" onclick="handleLogin()" id="authBtn">Play as Guest</button>
             <p style="color: var(--text-secondary); font-size: 13px; margin-top: 12px;">🔒 Your progress auto-saves online</p>
-            <div id="debugBox" style="display:none; margin-top:16px; padding:12px; background:rgba(255,69,58,0.15); border:1px solid var(--danger); border-radius:10px; font-size:11px; color:var(--danger); word-break:break-all; text-align:left; line-height:1.5;"></div>
         </div>
     </div>
 
@@ -3137,7 +3136,18 @@
 
         function renderLeaderboard() {
             document.getElementById('mainContent').innerHTML = `
-                <div class="live-badge"><div class="live-dot"></div><span>LIVE</span></div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+  
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    <span>LIVE</span>
+  </div>
+
+  <span style="color: #e6c200; font-size: 10px;">
+    Stay online to break Records
+  </span>
+
+</div>
                 <div class="tabs">
                     <button class="tab active" onclick="switchLeaderboard('global', this)">🏆 Global XP</button>
                     <button class="tab" onclick="switchLeaderboard('easy', this)">Easy</button>
@@ -3535,11 +3545,11 @@
                 <div class="info-card">
                     <div class="info-title">🏏 Maths Yorker</div>
                     <div class="info-text">
-                        App Developed by <strong>Shorab</strong><br><br>
+                        App Developed by <strong>Shorab 🇮🇳</strong><br><br>
                         Shorab loves cricket 🏏 and mathematics ➗. During his competitive exam preparation, he realized that maths is a key scoring subject, so he created Maths Yorker.
                     </div>
                     <div class="info-text hindi">
-                        शोरब को क्रिकेट 🏏 और गणित ➗ से लगाव है। उन्होंने यह ऐप अभ्यास को तेज और प्रभावी बनाने के लिए बनाया।
+                        Shorab को क्रिकेट 🏏 और गणित ➗ से लगाव है। उन्होंने यह ऐप अभ्यास को तेज और प्रभावी बनाने के लिए बनाया।
                     </div>
                     <div class="info-text">
                         This app improves speed, accuracy, and confidence.<br>
@@ -3631,21 +3641,7 @@
         // ==================== MULTIPLAYER RENDER ====================
         function renderMultiplayer() {
             document.getElementById('mainContent').innerHTML = `
-                <div class="mp-hero-card">
-                    <div style="text-align:center;">
-                        <div style="font-size:48px; margin-bottom:8px;">🎮</div>
-                        <div class="mp-title" style="justify-content:center; color:var(--warning);">Multiplayer</div>
-                        <div class="mp-subtitle">Compete with friends in real-time!<br> make sure Internet is connected</div>
-                    </div>
-                </div>
-
-                <div class="mp-section-card">
-                    <div style="font-size:12px; color:var(--text-secondary); text-align:center;">SUBMIT YOUR QUERIES BELOW</div>
-                    <div style="display:flex; gap:8px; margin-top:10px;">
-                        <input type="text" class="mp-input" id="quickJoinCode" placeholder="TYPE HERE" maxlength="50" style="margin-bottom:0; text-align:center; font-size:20px; font-weight:700; letter-spacing:8px;">
-                        <button class="mp-action-btn primary" onclick="quickJoinRoom()" style="width:auto; min-width:90px;">SUBMIT</button>
-                    </div>
-                </div>
+                
 
                 <div class="mp-section-card" onclick="renderFriends()" style="cursor:pointer;">
                     <div style="display:flex; align-items:center; gap:12px;">
@@ -3739,34 +3735,10 @@
             });
         }
 
-        function showJoinRoom() {
-            document.getElementById('mainContent').innerHTML = `
-                <div class="learn-page-header">
-                    <div class="back-btn" onclick="renderMultiplayer()">←</div>
-                    <div class="learn-page-title">Join Room</div>
-                </div>
-                <div class="mp-section-card" style="text-align:center;">
-                    <div style="font-size:48px; margin-bottom:16px;">🔑</div>
-                    <div class="section-title">ENTER ROOM CODE</div>
-                    <input type="text" class="mp-input" id="joinRoomInput" placeholder="3-digit code" maxlength="3" style="text-align:center; font-size:28px; font-weight:700; letter-spacing:12px;">
-                    <button class="mp-action-btn primary" onclick="joinRoom()">🔑 JOIN ROOM</button>
-                </div>
-            `;
-        }
+       
 
-        function quickJoinRoom() {
-            const code = document.getElementById('quickJoinCode').value.trim();
-            if (!code || code.length !== 3) { showToast('Enter a 3-digit room code', 'info'); return; }
-            mpState.messagesSent = 0;
-            joinRoomWithCode(code);
-        }
-
-        function joinRoom() {
-            const code = document.getElementById('joinRoomInput').value.trim();
-            if (!code || code.length !== 3) { showToast('Enter a 3-digit room code', 'info'); return; }
-            mpState.messagesSent = 0;
-            joinRoomWithCode(code);
-        }
+        
+        
 
         function joinRoomWithCode(code) {
             db.ref('rooms/' + code).once('value').then(snapshot => {
@@ -8516,7 +8488,7 @@
                 </div>\
                 <button class="mp-action-btn success" onclick="trShowCreate()">🏠 Create Room</button>\
                 <div style="display:flex;gap:8px;margin-top:10px;">\
-                    <input type="text" class="mp-input" id="trQuickJoinCode" placeholder="Enter Room Code" maxlength="3" style="margin-bottom:0;text-align:center;font-size:20px;font-weight:700;letter-spacing:8px;flex:1;">\
+                    <input type="text" class="mp-input" id="trQuickJoinCode" placeholder="Enter🔑Room Code" maxlength="3" style="margin-bottom:0;text-align:center;font-size:20px;font-weight:700;letter-spacing:8px;flex:1;">\
                     <button class="mp-action-btn primary" onclick="trQuickJoin()" style="width:auto;min-width:90px;">JOIN</button>\
                 </div>';
             mc.appendChild(testRoomCard);
