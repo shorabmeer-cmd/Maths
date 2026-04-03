@@ -1584,7 +1584,40 @@
                 auth = firebase.auth();
                 _debug('Firebase OK | Domain: ' + location.hostname);
 
-                // SINGLE auth listener — handles all cases
+                // CRITICAL: Force LOCAL persistence so auth survives page redirects
+                auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(function() {
+                    _debug('Auth persistence set to LOCAL');
+                }).catch(function(e) {
+                    _debug('Persistence warning: ' + e.message);
+                });
+
+                // Handle redirect result from Google OAuth — catches errors like unauthorized-domain
+                auth.getRedirectResult().then(function(result) {
+                    if (result.credential) {
+                        _debug('Redirect OK: ' + result.user.uid);
+                    } else if (result.user) {
+                        _debug('Redirect: user restored (no new credential)');
+                    } else {
+                        _debug('Redirect: no result (normal page load or cancelled)');
+                    }
+                }).catch(function(error) {
+                    _debug('REDIRECT ERROR: ' + error.code + ' | ' + error.message);
+                    var errEl = document.getElementById('authError');
+                    var errMsg = '';
+                    if (error.code === 'auth/unauthorized-domain') {
+                        errMsg = 'Domain "' + location.hostname + '" not authorized in Firebase! Go to Firebase Console > Authentication > Settings > Authorized domains > Upgrade to Identity Platform first, then add your domain.';
+                        alert('Firebase Error: ' + errMsg);
+                    } else if (error.code === 'auth/web-storage-unsupported') {
+                        errMsg = 'Cookies/storage blocked! Allow third-party cookies for this site.';
+                        alert('Firebase Error: ' + errMsg);
+                    } else {
+                        errMsg = 'Login error: ' + (error.code || error.message);
+                    }
+                    if (errEl) errEl.textContent = errMsg;
+                    _resetGoogleBtn();
+                });
+
+                // MAIN auth listener — handles all sign-in states
                 auth.onAuthStateChanged(function(user) {
                     if (user) {
                         _debug('Auth: user=' + user.uid + ' provider=' + (user.providerData[0] ? user.providerData[0].providerId : 'none'));
@@ -4672,20 +4705,21 @@
     function _serverTs() { return firebase.database.ServerValue.TIMESTAMP; }
 
     // ================================================================
-    // 4. GOOGLE LOGIN — Simple redirect approach
+    // 4. GOOGLE LOGIN — Redirect approach with full error visibility
     // ================================================================
-    // When user clicks "Continue with Google":
-    //   1. signInWithRedirect() → page goes to Google
-    //   2. User picks account → page comes back
-    //   3. Firebase auto-restores session → onAuthStateChanged fires
-    //   4. loadUserProfile checks DB → shows app or username modal
-    // That's it. No getRedirectResult, no race conditions.
+    // Flow:
+    //   1. signInWithRedirect() → browser goes to Google OAuth page
+    //   2. User picks account → Google redirects to Firebase handler
+    //   3. Firebase processes result → redirects back to this page
+    //   4. On page load: getRedirectResult() catches errors
+    //   5. onAuthStateChanged fires with signed-in user
+    //   6. loadUserProfile checks DB → shows app or username modal
 
     window.handleGoogleLogin = function() {
         _debug('--- Google login clicked ---');
         if (typeof auth === 'undefined' || !auth) {
             _debug('ERROR: Firebase auth not ready');
-            showToast('Please wait, initializing...', 'info');
+            alert('Firebase is still loading. Please wait 2 seconds and try again.');
             return;
         }
         var btn = document.getElementById('googleLoginBtn');
@@ -4695,24 +4729,32 @@
         provider.addScope('email');
         provider.addScope('profile');
 
+        _debug('Domain: ' + location.hostname);
+        _debug('Auth domain: ' + firebase.app().options.authDomain);
         _debug('Calling signInWithRedirect...');
+
         auth.signInWithRedirect(provider).then(function() {
             _debug('Redirect started (page will go to Google)');
         }).catch(function(e) {
-            _debug('ERROR: ' + e.code + ' | ' + e.message);
+            _debug('SIGN_IN_ERROR: ' + e.code + ' | ' + e.message);
             _resetGoogleBtn();
 
-            var errEl = document.getElementById('authError');
             var errMsg = '';
             if (e.code === 'auth/unauthorized-domain') {
-                errMsg = 'Domain ' + location.hostname + ' not authorized! Go to Firebase Console > Auth > Settings > Authorized domains and add it.';
+                errMsg = '❌ DOMAIN NOT AUTHORIZED!\n\nYour domain "' + location.hostname + '" is not allowed for Google login.\n\nFix: Firebase Console > Authentication > Settings > Authorized domains\n1. First click "Upgrade to Identity Platform"\n2. Then add "' + location.hostname + '"\n3. Save and try again.';
+                alert(errMsg);
             } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
                 errMsg = 'Login cancelled.';
+            } else if (e.code === 'auth/network-request-failed') {
+                errMsg = 'Network error! Check your internet connection.';
+                alert('Network Error: ' + e.message);
             } else {
                 errMsg = 'Error: ' + (e.code || e.message);
             }
+
+            var errEl = document.getElementById('authError');
             if (errEl) errEl.textContent = errMsg;
-            if (errMsg) showToast(errMsg, 'info');
+            if (errMsg) showToastSafe(errMsg, 'info');
         });
     };
 
