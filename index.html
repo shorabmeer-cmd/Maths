@@ -1636,6 +1636,27 @@
             if (btn) { btn.disabled = false; btn.innerHTML = _googleBtnHtml; }
         }
 
+        // Safety timeout: if Google button stays "Connecting..." for 15 seconds, auto-reset
+        function _startGoogleBtnSafetyTimeout() {
+            clearTimeout(window._googleBtnTimeout);
+            window._googleBtnTimeout = setTimeout(function() {
+                var btn = document.getElementById('googleLoginBtn');
+                if (btn && btn.disabled) {
+                    console.warn('Google login safety timeout: resetting button after 15s');
+                    _resetGoogleBtn();
+                    var errEl = document.getElementById('authError');
+                    if (errEl && !errEl.textContent) {
+                        errEl.textContent = 'Login taking too long. Please try again.';
+                    }
+                    _googleLoginInProgress = false;
+                }
+            }, 15000);
+        }
+
+        function _clearGoogleBtnSafetyTimeout() {
+            clearTimeout(window._googleBtnTimeout);
+        }
+
         // ==================== TOAST SYSTEM ====================
         function showToast(message, type = 'info') {
             const container = document.getElementById('toastContainer');
@@ -1791,17 +1812,22 @@
                     if (data.currentTheme) applyTheme(data.currentTheme);
                     showMainApp();
                 } else {
-                    // No user data in DB yet — check if Google redirect is in progress
+                    // No user data in DB yet
+                    // Check if Google login/redirect is in progress — DON'T show auth screen if so
                     const user = auth.currentUser;
                     const isGoogleRedirect = (typeof window._isGoogleRedirectPending === 'function') && window._isGoogleRedirectPending();
+
+                    if (_googleLoginInProgress) {
+                        // Google popup/redirect handler is processing — wait for it
+                        console.log('loadUserProfile: Google login in progress, waiting...');
+                        return;
+                    }
 
                     if (isGoogleRedirect && user && user.providerData && user.providerData.length > 0) {
                         const isGoogle = user.providerData.some(p => p.providerId === 'google.com');
                         if (isGoogle) {
                             // Google redirect is still processing — DON'T show auth screen.
-                            // The getRedirectResult handler will set up the user profile.
                             console.log('loadUserProfile: Google redirect in progress, waiting...');
-                            // Safety: if getRedirectResult doesn't resolve in 5s, show auth screen
                             setTimeout(function() {
                                 if (typeof window._isGoogleRedirectPending === 'function' && window._isGoogleRedirectPending()) {
                                     console.warn('loadUserProfile: Google redirect timeout, showing auth screen');
@@ -1847,11 +1873,16 @@
         }
 
         // ==================== SCREEN MANAGEMENT ====================
+        // Flag to prevent loadUserProfile from interfering during Google login
+        var _googleLoginInProgress = false;
+
         function showAuthScreen() {
             document.getElementById('authScreen').classList.remove('hidden');
             document.getElementById('mainApp').classList.add('hidden');
             document.getElementById('authBtn').disabled = false;
             document.getElementById('authError').textContent = '';
+            // Also reset Google button if it's stuck in loading state
+            _resetGoogleBtn();
         }
 
         function showMainApp() {
@@ -4704,7 +4735,9 @@
     function _handleGoogleAuthResult(result) {
         currentUser = result.user;
         currentUserId = currentUser.uid;
-        return db.ref('users/' + currentUserId).once('value').then(function(snapshot) {
+        _googleLoginInProgress = true; // Prevent loadUserProfile from interfering
+
+        db.ref('users/' + currentUserId).once('value').then(function(snapshot) {
             var existing = snapshot.val();
             if (existing && existing.username) {
                 existing.loginProvider = 'google';
@@ -4716,14 +4749,31 @@
                 localStorage.setItem('mathsYorkerUserData', JSON.stringify(existing));
                 db.ref('users/' + currentUserId).update({ loginProvider: 'google', email: result.user.email || '', lastLogin: _now() });
                 if (existing.currentTheme && typeof applyTheme === 'function') applyTheme(existing.currentTheme);
-                if (typeof showMainApp === 'function') showMainApp();
+                _googleLoginInProgress = false;
+                _clearGoogleBtnSafetyTimeout();
+                try {
+                    if (typeof showMainApp === 'function') showMainApp();
+                } catch(e) {
+                    console.error('showMainApp error after Google login:', e);
+                    showAuthScreen();
+                }
                 showToastSafe('Welcome back, ' + existing.username + '! \uD83D\uDC4B', 'success');
                 _setupInviteListener();
             } else {
                 currentUser = result.user;
                 currentUserId = currentUser.uid;
+                _googleLoginInProgress = false;
+                _clearGoogleBtnSafetyTimeout();
                 _showUsernameSetupModal(result.user);
             }
+        }).catch(function(err) {
+            console.error('_handleGoogleAuthResult DB error:', err);
+            _googleLoginInProgress = false;
+            _clearGoogleBtnSafetyTimeout();
+            _resetGoogleBtn();
+            var errEl = document.getElementById('authError');
+            if (errEl) errEl.textContent = 'Login error. Please try again.';
+            showToastSafe('Something went wrong. Please try again.', 'info');
         });
     }
 
@@ -4734,21 +4784,29 @@
         var provider = new firebase.auth.GoogleAuthProvider();
         provider.addScope('email');
         provider.addScope('profile');
+        _googleLoginInProgress = true;
+        _startGoogleBtnSafetyTimeout(); // Auto-reset if stuck for 15 seconds
 
         // Try popup first (better UX), fallback to redirect if popup is blocked
         auth.signInWithPopup(provider).then(function(result) {
             _googleRedirectPending = false;
-            _resetGoogleBtn();
             if (result && result.user) {
-                _handleGoogleAuthResult(result);
+                _handleGoogleAuthResult(result); // This will reset button & clear timeout
+            } else {
+                _googleLoginInProgress = false;
+                _clearGoogleBtnSafetyTimeout();
+                _resetGoogleBtn();
             }
         }).catch(function(e) {
             // If popup blocked or failed, try redirect
             if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
                 console.log('Popup failed (' + e.code + '), trying redirect...');
                 auth.signInWithRedirect(provider);
+                // Page will reload, no need to reset button
             } else {
                 _googleRedirectPending = false;
+                _googleLoginInProgress = false;
+                _clearGoogleBtnSafetyTimeout();
                 _resetGoogleBtn();
 
                 var errEl = document.getElementById('authError');
