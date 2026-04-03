@@ -1786,9 +1786,12 @@
         }
 
         function loadUserProfile(uid) {
+            _debug('loadUserProfile: reading DB for uid=' + uid);
             db.ref('users/' + uid).once('value').then((snapshot) => {
                 const data = snapshot.val();
-                if (data) {
+                _debug('loadUserProfile: DB result = ' + (data ? 'FOUND (username=' + (data.username || 'N/A') + ')' : 'NULL (no data)'));
+                if (data && data.username) {
+                    _debug('loadUserProfile: existing user, showing main app');
                     userProfile = data;
                     // Ensure arrays exist
                     if (!data.unlockedThemes) data.unlockedThemes = ['default', 'blue_pro', 'dark_mode', 'neon_glow'];
@@ -1801,24 +1804,36 @@
                 } else {
                     // No user data in DB yet — check if this is a Google user
                     const user = auth.currentUser;
+                    _debug('loadUserProfile: no data. currentUser=' + (user ? user.uid : 'null') + ' providerData=' + (user ? JSON.stringify(user.providerData.map(function(p){return p.providerId;})) : 'none'));
                     const isGoogle = user && user.providerData && user.providerData.some(function(p) {
                         return p.providerId === 'google.com';
                     });
 
                     if (isGoogle) {
                         // New Google user — show username setup modal
-                        console.log('[Auth] New Google user, showing username modal');
+                        _debug('loadUserProfile: NEW Google user! Showing username modal');
                         _resetGoogleBtn();
                         _showUsernameSetupModal(user);
                     } else {
                         // Anonymous user with no data — show auth screen
-                        console.log('[Auth] No user data, showing auth screen');
+                        _debug('loadUserProfile: Not Google user, showing auth screen');
                         showAuthScreen();
                     }
                 }
             }).catch(function(err) {
+                _debug('loadUserProfile DB ERROR: ' + err.code + ' | ' + err.message);
                 console.error('[Auth] loadUserProfile error:', err);
-                showAuthScreen();
+                // Don't go to auth screen for Google users even on error — show username modal
+                var user = auth.currentUser;
+                var isGoogle = user && user.providerData && user.providerData.some(function(p) {
+                    return p.providerId === 'google.com';
+                });
+                if (isGoogle) {
+                    _debug('loadUserProfile: DB error but user is Google, showing username modal anyway');
+                    _showUsernameSetupModal(user);
+                } else {
+                    showAuthScreen();
+                }
             });
         }
 
