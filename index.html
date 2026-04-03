@@ -4716,7 +4716,6 @@
     //   6. loadUserProfile checks DB → shows app or username modal
 
     window.handleGoogleLogin = function() {
-        alert('Google login clicked! Will redirect to Google...');
         _debug('--- Google login clicked ---');
         if (typeof auth === 'undefined' || !auth) {
             _debug('ERROR: Firebase auth not ready');
@@ -4730,33 +4729,52 @@
         provider.addScope('email');
         provider.addScope('profile');
 
-        _debug('Domain: ' + location.hostname);
-        _debug('Auth domain: ' + firebase.app().options.authDomain);
-        _debug('Calling signInWithRedirect...');
+        _debug('Trying signInWithPopup (avoids cross-domain cookie issues)...');
 
-        auth.signInWithRedirect(provider).then(function() {
-            _debug('Redirect started (page will go to Google)');
-            // If we reach here, redirect was initiated successfully
-        }).catch(function(e) {
-            _debug('SIGN_IN_ERROR: ' + e.code + ' | ' + e.message);
-            _resetGoogleBtn();
-            // IMPORTANT: Show ALL errors as alerts so user sees them
-            var errMsg = '';
-            if (e.code === 'auth/unauthorized-domain') {
-                errMsg = '❌ DOMAIN NOT AUTHORIZED!\n\nYour domain "' + location.hostname + '" is not allowed for Google login.\n\nFix: Firebase Console > Authentication > Settings > Authorized domains\n1. First click "Upgrade to Identity Platform"\n2. Then add "' + location.hostname + '"\n3. Save and try again.';
-            } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
-                errMsg = 'Login cancelled.';
-            } else if (e.code === 'auth/network-request-failed') {
-                errMsg = 'Network error! Check your internet connection.';
-            } else if (e.code === 'auth/operation-not-supported-in-this-environment') {
-                errMsg = 'Google login not supported in this browser/environment!';
+        // POPUP FIRST — avoids cross-domain cookie blocking
+        auth.signInWithPopup(provider).then(function(result) {
+            _debug('Popup SUCCESS! User: ' + result.user.uid + ' | Provider: ' + result.credential.providerId);
+            // onAuthStateChanged will automatically fire and handle the rest
+            // No need to manually do anything here
+        }).catch(function(popupError) {
+            _debug('Popup failed: ' + popupError.code + ' | ' + popupError.message);
+
+            // If popup blocked by browser → fall back to redirect
+            if (popupError.code === 'auth/popup-blocked' ||
+                popupError.code === 'auth/popup-closed-by-user' ||
+                popupError.code === 'auth/cancelled-popup-request') {
+
+                _debug('Popup blocked/closed. Trying signInWithRedirect...');
+                auth.signInWithRedirect(provider).then(function() {
+                    _debug('Redirect started...');
+                }).catch(function(redirectError) {
+                    _debug('Redirect also failed: ' + redirectError.code + ' | ' + redirectError.message);
+                    _resetGoogleBtn();
+                    var errMsg = 'Login failed: ' + (redirectError.code || redirectError.message);
+                    if (redirectError.code === 'auth/unauthorized-domain') {
+                        errMsg = 'Domain "' + location.hostname + '" not authorized! Firebase Console > Auth > Settings > Authorized domains > Upgrade + Add domain.';
+                    }
+                    alert('GOOGLE LOGIN ERROR:\n' + errMsg);
+                    var errEl = document.getElementById('authError');
+                    if (errEl) errEl.textContent = errMsg;
+                });
+
             } else {
-                errMsg = 'Error: ' + (e.code || e.message);
+                // Real error (not popup-blocked)
+                _resetGoogleBtn();
+                var errMsg = '';
+                if (popupError.code === 'auth/unauthorized-domain') {
+                    errMsg = 'Domain "' + location.hostname + '" not authorized! Firebase Console > Auth > Settings > Authorized domains > Upgrade to Identity Platform + Add domain.';
+                } else if (popupError.code === 'auth/network-request-failed') {
+                    errMsg = 'Network error! Check internet.';
+                } else {
+                    errMsg = 'Error: ' + (popupError.code || popupError.message);
+                }
+                alert('GOOGLE LOGIN ERROR:\n' + errMsg);
+                var errEl = document.getElementById('authError');
+                if (errEl) errEl.textContent = errMsg;
+                if (errMsg) showToastSafe(errMsg, 'info');
             }
-            alert('GOOGLE LOGIN ERROR:\n' + errMsg);
-            var errEl = document.getElementById('authError');
-            if (errEl) errEl.textContent = errMsg;
-            if (errMsg) showToastSafe(errMsg, 'info');
         });
     };
 
@@ -7183,7 +7201,7 @@
             var codeEl = document.getElementById('trQuickJoinCode');
             if (!codeEl) return;
             var code = codeEl.value.trim();
-            if (!code || code.length !== 3) { showToast('Thanks For Your Feedback', 'info'); return; }
+            if (!code || code.length !== 3) { showToast('Enter a 3-digit room code', 'info'); return; }
 
             if (!currentUserId || !db) { showToast('Please login first!', 'info'); return; }
             db.ref('testRooms/' + code).once('value').then(function(snapshot) {
