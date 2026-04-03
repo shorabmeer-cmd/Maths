@@ -4793,7 +4793,7 @@
         });
     };
 
-    function _showUsernameSetupModal(user) {
+    window._showUsernameSetupModal = function(user) {
         var modal = document.createElement('div');
         modal.className = 'v6-username-overlay';
         modal.id = 'v6UsernameModal';
