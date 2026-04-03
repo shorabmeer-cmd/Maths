@@ -960,8 +960,8 @@
 
         /* Ranking Items */
         .tr-rank-item {
-            display: flex; align-items: center; gap: 12px;
-            padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05);
         }
         .tr-rank-item:last-child { border-bottom: none; }
         .tr-rank-badge {
@@ -973,10 +973,25 @@
         .tr-rank-badge.silver { background: var(--silver); color: #000; }
         .tr-rank-badge.bronze { background: var(--bronze); color: #fff; }
         .tr-rank-badge.normal { background: var(--bg-elevated); color: var(--text-secondary); }
-        .tr-rank-name { font-size: 15px; font-weight: 600; flex: 1; }
-        .tr-rank-you { font-size: 10px; padding: 2px 8px; background: var(--primary); border-radius: 10px; color: white; margin-left: 6px; }
-        .tr-rank-time { font-family: 'SF Mono', monospace; font-size: 16px; font-weight: 700; color: var(--primary); }
-        .tr-rank-dnf { font-size: 13px; color: var(--danger); font-weight: 600; }
+        .tr-rank-name { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; }
+        .tr-rank-name span { display: block; }
+        .tr-rank-you { font-size: 9px; padding: 1px 6px; background: var(--primary); border-radius: 10px; color: white; margin-left: 4px; vertical-align: middle; }
+        .tr-rank-scores {
+            display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0;
+        }
+        .tr-rank-correct {
+            font-family: 'SF Mono', monospace; font-size: 15px; font-weight: 700; color: var(--success);
+        }
+        .tr-rank-correct.dnf { color: var(--warning); }
+        .tr-rank-attempted {
+            font-size: 11px; color: var(--text-tertiary); font-weight: 400;
+        }
+        .tr-rank-time {
+            font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+        }
+        .tr-rank-dnf-label {
+            font-size: 10px; color: var(--danger); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+        }
 
         /* Test Room Waiting Lobby */
         .tr-lobby-overlay {
@@ -3460,15 +3475,15 @@
                     <div style="text-align:center;">
                         <div style="font-size:48px; margin-bottom:8px;">🎮</div>
                         <div class="mp-title" style="justify-content:center; color:var(--warning);">Multiplayer</div>
-                        <div class="mp-subtitle">Compete with friends in real-time!</div>
+                        <div class="mp-subtitle">Compete with friends in real-time!<br> make sure Internet is connected</div>
                     </div>
                 </div>
 
                 <div class="mp-section-card">
-                    <div style="font-size:12px; color:var(--text-secondary); text-align:center;">JOIN WITH ROOM CODE</div>
+                    <div style="font-size:12px; color:var(--text-secondary); text-align:center;">SUBMIT YOUR QUERIES BELOW</div>
                     <div style="display:flex; gap:8px; margin-top:10px;">
-                        <input type="text" class="mp-input" id="quickJoinCode" placeholder="Enter Room Code" maxlength="3" style="margin-bottom:0; text-align:center; font-size:20px; font-weight:700; letter-spacing:8px;">
-                        <button class="mp-action-btn primary" onclick="quickJoinRoom()" style="width:auto; min-width:90px;">JOIN</button>
+                        <input type="text" class="mp-input" id="quickJoinCode" placeholder="TYPE HERE" maxlength="50" style="margin-bottom:0; text-align:center; font-size:20px; font-weight:700; letter-spacing:8px;">
+                        <button class="mp-action-btn primary" onclick="quickJoinRoom()" style="width:auto; min-width:90px;">SUBMIT</button>
                     </div>
                 </div>
 
@@ -6968,7 +6983,12 @@
             localStartOffset: null,   // Date.now() when serverStartTime was received
             // Live progress tracking
             liveProgressListener: null,
-            _submitRetryCount: 0
+            _submitRetryCount: 0,
+            // [BUG #3 FIX] User isolation — lock this TR session to a specific userId
+            _lockedUserId: null,
+            // [BUG #1 FIX] Real-time attempt tracking
+            _attemptedQuestions: {},  // {qIndex: true} — track which questions user has seen
+            _attemptedCount: 0
         };
 
         var TR_TEST_TIMES = { easy: 30000, medium: 60000, hard: 100000 }; // ms
@@ -7054,14 +7074,16 @@
             TR.isHost = true;
             TR.difficulty = TR.difficulty || 'easy';
             TR.totalTestTime = TR_TEST_TIMES[TR.difficulty];
+            // [BUG #3 FIX] Lock this session to current user
+            TR._lockedUserId = currentUserId;
 
             // Pre-generate questions — store in both local storage and Firebase
             var questions = trGenerateQuestions(TR.difficulty);
             var serializableQs = questions.map(function(q) { return { text: q.text, answer: q.answer }; });
 
-            // Save to local storage for fast access
+            // Save to local storage for fast access — [BUG #3 FIX] user-specific key
             try {
-                localStorage.setItem('tr_questions_' + roomId, JSON.stringify(serializableQs));
+                localStorage.setItem('tr_questions_' + currentUserId + '_' + roomId, JSON.stringify(serializableQs));
             } catch(e) { /* ignore if storage is full */ }
 
             var roomData = {
@@ -7111,9 +7133,9 @@
                     return;
                 }
 
-                // Cache questions to local storage for fast access
+                // [BUG #3 FIX] Cache questions with user-specific key
                 if (room.questions) {
-                    try { localStorage.setItem('tr_questions_' + code, JSON.stringify(room.questions)); } catch(e) {}
+                    try { localStorage.setItem('tr_questions_' + currentUserId + '_' + code, JSON.stringify(room.questions)); } catch(e) {}
                 }
 
                 var data = getUserData();
@@ -7125,6 +7147,8 @@
                 TR.isHost = false;
                 TR.difficulty = room.difficulty;
                 TR.totalTestTime = TR_TEST_TIMES[room.difficulty];
+                // [BUG #3 FIX] Lock this session to current user
+                TR._lockedUserId = currentUserId;
                 trEnterLobby(parseInt(code));
             });
         };
@@ -7143,9 +7167,9 @@
                 if (room.status !== TR_STATE.WAITING) { showToast('Game already in progress!', 'info'); return; }
                 if (Object.keys(room.players || {}).length >= 10) { showToast('Room is full!', 'info'); return; }
 
-                // Cache questions to local storage for fast access
+                // [BUG #3 FIX] Cache questions with user-specific key
                 if (room.questions) {
-                    try { localStorage.setItem('tr_questions_' + code, JSON.stringify(room.questions)); } catch(e) {}
+                    try { localStorage.setItem('tr_questions_' + currentUserId + '_' + code, JSON.stringify(room.questions)); } catch(e) {}
                 }
 
                 var data = getUserData();
@@ -7157,6 +7181,8 @@
                 TR.isHost = false;
                 TR.difficulty = room.difficulty;
                 TR.totalTestTime = TR_TEST_TIMES[room.difficulty];
+                // [BUG #3 FIX] Lock this session to current user
+                TR._lockedUserId = currentUserId;
                 trEnterLobby(parseInt(code));
             });
         };
@@ -7350,6 +7376,13 @@
             TR.resultsShown = false; TR.resultSubmitted = false; TR._lastHandledStatus = null;
             TR.serverStartTime = null; TR.localStartOffset = null;
             TR.answerTimes = []; TR.liveProgressListener = null; TR._submitRetryCount = 0;
+            // [BUG #3 FIX] Clear user lock and user-specific local storage
+            if (TR._lockedUserId) {
+                try { localStorage.removeItem('roomTest_' + TR._lockedUserId + '_state'); } catch(e) {}
+            }
+            TR._lockedUserId = null;
+            TR._attemptedQuestions = {};
+            TR._attemptedCount = 0;
         }
 
         function trCleanupAllListeners() {
@@ -7496,10 +7529,20 @@
                 return;
             }
 
-            // Load questions: prefer local storage (faster), fallback to Firebase
+            // [BUG #3 FIX] Validate user identity — abort if user changed mid-session
+            if (TR._lockedUserId && TR._lockedUserId !== currentUserId) {
+                console.error('[TR v3] User changed! Expected:', TR._lockedUserId, 'Got:', currentUserId);
+                showToast('Session error: user changed. Please rejoin.', 'info');
+                trLeaveLobby();
+                return;
+            }
+
+            // Load questions: prefer user-specific local storage (faster), then generic, then Firebase
             var questions = null;
             try {
-                var cached = localStorage.getItem('tr_questions_' + TR.roomId);
+                // [BUG #3 FIX] Try user-specific key first, then fallback to old key for backwards compat
+                var cached = localStorage.getItem('tr_questions_' + currentUserId + '_' + TR.roomId)
+                    || localStorage.getItem('tr_questions_' + TR.roomId);
                 if (cached) questions = JSON.parse(cached);
             } catch(e) {}
             if (!questions || questions.length === 0) {
@@ -7515,12 +7558,6 @@
             TR.serverStartTime = startTime;
             TR.localStartOffset = Date.now();  // We treat this moment as "startTime" locally
 
-            // Calculate how much time has already elapsed since the server start
-            // This handles the network latency between host setting start and client receiving it
-            var elapsedSinceStart = Date.now() - TR.localStartOffset; // Should be ~0
-            // But more accurately: the server start was some ms ago when we receive it
-            // For v3 with 0ms delay: startTime is very close to now, so just start immediately
-
             trActuallyStartGame(questions, startTime);
         }
 
@@ -7535,6 +7572,17 @@
             TR.resultSubmitted = false;
             TR.totalTestTime = TR_TEST_TIMES[TR.difficulty] || 30000;
             TR._submitRetryCount = 0;
+            // [BUG #1 FIX] Initialize real-time attempt tracking
+            TR._attemptedQuestions = {};
+            TR._attemptedCount = 0;
+            // [BUG #3 FIX] Re-lock user ID at game start
+            TR._lockedUserId = currentUserId;
+            // [BUG #3 FIX] Persist user-specific game state to localStorage as backup
+            try {
+                localStorage.setItem('roomTest_' + currentUserId + '_state', JSON.stringify({
+                    roomId: TR.roomId, userId: currentUserId, startedAt: Date.now()
+                }));
+            } catch(e) {}
 
             // Hide lobby, show game
             document.getElementById('trLobby').classList.remove('show');
@@ -7671,6 +7719,11 @@
         function trShowQuestion(idx) {
             if (idx >= TR.questions.length) { trFinishMyGame(); return; }
             TR.currentQIndex = idx;
+            // [BUG #1 FIX] Track this question as attempted the moment it's shown to user
+            if (!TR._attemptedQuestions[idx]) {
+                TR._attemptedQuestions[idx] = true;
+                TR._attemptedCount++;
+            }
             var q = TR.questions[idx];
             document.getElementById('trQNum').textContent = idx + 1;
             document.getElementById('trQLabel').textContent = 'Question ' + (idx + 1);
@@ -7793,8 +7846,24 @@
             // Get precise elapsed time in ms since game start
             var elapsedMs = trGetElapsedMs();
 
-            if (userAnswer === q.answer || parseFloat(userAnswer) === q.answer) {
+            // [BUG #2 FIX] Robust numeric comparison with epsilon tolerance
+            // Handles floating point edge cases and type coercion
+            var expectedAnswer = Number(q.answer);
+            var userNum = Number(userAnswer);
+            var isCorrect = false;
+            if (!isNaN(userNum) && !isNaN(expectedAnswer)) {
+                isCorrect = Math.abs(userNum - expectedAnswer) < 0.001;  // epsilon tolerance for float precision
+            } else if (typeof userAnswer === 'string' && typeof q.answer === 'number') {
+                // Fallback: string comparison after trimming whitespace
+                isCorrect = userAnswer.trim() === q.answer.toString();
+            }
+
+            if (isCorrect) {
                 TR.correctCount++;
+                // [BUG #2 FIX] Persist correctCount to user-specific localStorage in real-time
+                try {
+                    localStorage.setItem('roomTest_' + currentUserId + '_correctCount', TR.correctCount.toString());
+                } catch(e) {}
                 // Store answer with ms precision
                 TR.answerTimes.push({
                     qIndex: TR.currentQIndex,
@@ -7847,6 +7916,19 @@
         // ==================== FINISH GAME v3 — robust submission with retry ====================
         function trFinishMyGame() {
             if (TR.resultSubmitted) return;
+
+            // [BUG #3 FIX] Validate user identity before submitting results
+            if (TR._lockedUserId && TR._lockedUserId !== currentUserId) {
+                console.error('[TR v3] Cannot submit results: user changed! Expected:', TR._lockedUserId, 'Got:', currentUserId);
+                showToast('Session error: user changed during test.', 'info');
+                return;
+            }
+            if (!currentUserId) {
+                console.error('[TR v3] Cannot submit results: no currentUserId!');
+                showToast('Session error: not logged in.', 'info');
+                return;
+            }
+
             TR.resultSubmitted = true;
             TR.gameActive = false;
             if (TR.timerInterval) { clearInterval(TR.timerInterval); TR.timerInterval = null; }
@@ -7858,10 +7940,17 @@
             if (totalTime > TR.totalTestTime) totalTime = TR.totalTestTime; // Cap at max time
             var completed = TR.correctCount >= 10;
 
-            // Count unique questions attempted (user saw and tried to answer)
-            var attemptedQuestions = {};
-            TR.answerTimes.forEach(function(a) { attemptedQuestions[a.qIndex] = true; });
-            var attemptedCount = Object.keys(attemptedQuestions).length;
+            // [BUG #1 FIX] Use real-time tracked attemptedCount (questions shown to user)
+            // Also merge with answerTimes data for questions that had actual answer attempts
+            var attemptedFromAnswers = {};
+            TR.answerTimes.forEach(function(a) { attemptedFromAnswers[a.qIndex] = true; });
+            // Merge: any question that was either shown OR had an answer attempt counts
+            var mergedAttempted = Object.assign({}, TR._attemptedQuestions, attemptedFromAnswers);
+            var attemptedCount = Object.keys(mergedAttempted).length;
+            // Ensure at minimum, the current question index + 1 is reflected if user was on a question
+            if (attemptedCount < TR.currentQIndex + 1 && TR.currentQIndex < 10) {
+                attemptedCount = TR.currentQIndex + 1;
+            }
 
             // Build answer times array for Firebase (only correct answers, with ms precision)
             var correctAnswerTimes = TR.answerTimes
@@ -7875,19 +7964,25 @@
 
             trShowWaitingScreen();
 
-            // Build the result payload
+            // Build the result payload — [BUG #3 FIX] embed userId for verification
             var resultData = {
+                userId: currentUserId,  // [BUG #3 FIX] Store userId in result for validation
                 username: getUserData().username || 'Guest',
                 totalTime: totalTime,            // ms taken (capped at totalTestTime for DNF)
                 correctCount: TR.correctCount,
                 wrongAttempts: TR.wrongAttempts,
-                attemptedCount: attemptedCount,   // How many unique questions were attempted
+                attemptedCount: attemptedCount,   // [BUG #1 FIX] Reliable count of attempted questions
                 completed: completed,
                 correctAnswerTimes: correctAnswerTimes.join(','),  // ms for each correct answer
                 allAttempts: JSON.stringify(allAttempts),
                 finishedAt: firebase.database.ServerValue.TIMESTAMP,
                 submissionOrder: firebase.database.ServerValue.TIMESTAMP
             };
+
+            console.log('[TR v3] Submitting result — User:', currentUserId, 'Correct:', TR.correctCount, 'Attempted:', attemptedCount, 'Completed:', completed, 'Time:', totalTime + 'ms');
+
+            // [BUG #3 FIX] Submit under the locked user ID, not currentUserId (in case it changed)
+            var submitUserId = TR._lockedUserId || currentUserId;
 
             // Submit with retry (up to 3 times)
             function submitResult(retryCount) {
@@ -7899,7 +7994,7 @@
                     return;
                 }
 
-                db.ref('testRooms/' + TR.roomId + '/results/' + currentUserId).set(resultData)
+                db.ref('testRooms/' + TR.roomId + '/results/' + submitUserId).set(resultData)
                     .then(function() {
                         console.log('[TR v3] Result submitted successfully. Time:', totalTime + 'ms, Correct:', TR.correctCount + '/10');
                         trUpdateMyLiveProgress();
@@ -8007,6 +8102,19 @@
             var players = room.players || {};
             var totalQuestions = 10;
 
+            // [BUG #3 FIX] Validate userId in each result — filter out corrupted/mismatched entries
+            var validatedResults = {};
+            Object.keys(results).forEach(function(uid) {
+                var r = results[uid];
+                // If the result has a userId field, verify it matches the Firebase key
+                if (r.userId && r.userId !== uid) {
+                    console.warn('[TR v3] Result userId mismatch! Key:', uid, 'Data.userId:', r.userId, '— Skipping.');
+                    return; // Skip corrupted entry
+                }
+                validatedResults[uid] = r;
+            });
+            results = validatedResults;
+
             // Build result list from submitted results
             var resultList = Object.entries(results).map(function(entry) {
                 var uid = entry[0]; var r = entry[1];
@@ -8076,13 +8184,15 @@
                     return 0;
                 }
 
-                // 2. Both DNF: most correct answers first
+                // 2. Both DNF (timeout): rank by most attempted questions first
+                if (a.attemptedCount !== b.attemptedCount) return b.attemptedCount - a.attemptedCount;
+                // 3. Same attempted: rank by most correct answers
                 if (a.correctCount !== b.correctCount) return b.correctCount - a.correctCount;
-                // 3. Same correct: rank by time taken for correct answers (faster = better)
+                // 4. Still tied: rank by time taken for correct answers (faster = better)
                 if (a.timeForCorrect !== b.timeForCorrect) return a.timeForCorrect - b.timeForCorrect;
-                // 4. Still tied: rank by total time
+                // 5. Still tied: rank by total time
                 if (a.totalTime !== b.totalTime) return a.totalTime - b.totalTime;
-                // 5. Still tied: submission order
+                // 6. Still tied: submission order
                 return (a.submissionOrder || 0) - (b.submissionOrder || 0);
             });
 
@@ -8095,7 +8205,7 @@
                 var isTie = false;
                 if (curr.completed && next.completed && curr.totalTime === next.totalTime) {
                     isTie = true;
-                } else if (!curr.completed && !next.completed && curr.correctCount === next.correctCount && curr.timeForCorrect === next.timeForCorrect) {
+                } else if (!curr.completed && !next.completed && curr.attemptedCount === next.attemptedCount && curr.correctCount === next.correctCount && curr.timeForCorrect === next.timeForCorrect) {
                     isTie = true;
                 }
                 if (isTie) {
@@ -8118,25 +8228,34 @@
 
                 var timeStr = (r.totalTime / 1000).toFixed(3) + 's';
 
-                // Build score info: shows correct/total, attempted count, and completion status
-                var scoreInfo = '';
+                // Build right-side scores column
+                var scoresHtml = '';
                 if (r.completed) {
-                    scoreInfo = '\u2705 ' + r.correctCount + '/' + totalQuestions + ' correct \u2022 ' + timeStr;
+                    scoresHtml = '<div class="tr-rank-scores">\
+                        <div class="tr-rank-correct">' + r.correctCount + '/' + totalQuestions + '</div>\
+                        <div class="tr-rank-time">' + timeStr + '</div>\
+                    </div>';
                 } else {
-                    scoreInfo = r.correctCount + '/' + totalQuestions + ' correct \u2022 ' + r.attemptedCount + ' attempted \u2022 DNF';
+                    scoresHtml = '<div class="tr-rank-scores">\
+                        <div class="tr-rank-correct dnf">' + r.correctCount + '/' + totalQuestions + '</div>\
+                        <div class="tr-rank-attempted">Attempted: ' + r.attemptedCount + '/' + totalQuestions + '</div>\
+                        <div class="tr-rank-dnf-label">DNF</div>\
+                    </div>';
                 }
 
                 return '<div class="tr-rank-item" style="' + (isYou ? 'background:rgba(0,122,255,0.1);border-radius:10px;padding:12px 8px;margin:0 -8px;' : '') + '">\
                     <div class="tr-rank-badge ' + badgeClass + '">' + badgeText + '</div>\
                     <div class="tr-lobby-friend-avatar" style="width:32px;height:32px;font-size:14px;">' + r.name.charAt(0).toUpperCase() + '</div>\
-                    <div class="tr-rank-name">' + r.name + (isYou ? '<span class="tr-rank-you">YOU</span>' : '') + '\
-                        <div style="font-size:11px;color:var(--text-tertiary);font-weight:400;">' + scoreInfo + '</div>\
-                    </div>\
-                    ' + (r.completed
-                        ? '<div class="tr-rank-time">' + timeStr + '</div>'
-                        : '<div class="tr-rank-dnf">' + r.correctCount + '/' + totalQuestions + '</div>') + '\
+                    <div class="tr-rank-name">' + r.name + (isYou ? '<span class="tr-rank-you">YOU</span>' : '') + '</div>\
+                    ' + scoresHtml + '\
                 </div>';
             }).join('');
+
+            // [BUG #3 FIX] Clean up user-specific localStorage after showing results
+            try {
+                localStorage.removeItem('roomTest_' + currentUserId + '_state');
+                localStorage.removeItem('roomTest_' + currentUserId + '_correctCount');
+            } catch(e) {}
 
             // My result summary
             var myResult = results[currentUserId] || {};
@@ -8146,7 +8265,7 @@
             var myAttempted = myResult.attemptedCount || 0;
 
             var mySummaryLine = myCompleted
-                ? myTimeStr + ' \u2022 ' + myCorrect + '/' + totalQuestions + ' correct'
+                ? myCorrect + '/' + totalQuestions + ' correct \u2022 ' + myTimeStr
                 : myCorrect + '/' + totalQuestions + ' correct \u2022 ' + myAttempted + ' attempted \u2022 DNF';
 
             document.getElementById('trResultCard').innerHTML = '\
