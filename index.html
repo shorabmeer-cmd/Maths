@@ -4716,6 +4716,7 @@
     //   6. loadUserProfile checks DB → shows app or username modal
 
     window.handleGoogleLogin = function() {
+        alert('Google login clicked! Will redirect to Google...');
         _debug('--- Google login clicked ---');
         if (typeof auth === 'undefined' || !auth) {
             _debug('ERROR: Firebase auth not ready');
@@ -4735,23 +4736,24 @@
 
         auth.signInWithRedirect(provider).then(function() {
             _debug('Redirect started (page will go to Google)');
+            // If we reach here, redirect was initiated successfully
         }).catch(function(e) {
             _debug('SIGN_IN_ERROR: ' + e.code + ' | ' + e.message);
             _resetGoogleBtn();
-
+            // IMPORTANT: Show ALL errors as alerts so user sees them
             var errMsg = '';
             if (e.code === 'auth/unauthorized-domain') {
                 errMsg = '❌ DOMAIN NOT AUTHORIZED!\n\nYour domain "' + location.hostname + '" is not allowed for Google login.\n\nFix: Firebase Console > Authentication > Settings > Authorized domains\n1. First click "Upgrade to Identity Platform"\n2. Then add "' + location.hostname + '"\n3. Save and try again.';
-                alert(errMsg);
             } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
                 errMsg = 'Login cancelled.';
             } else if (e.code === 'auth/network-request-failed') {
                 errMsg = 'Network error! Check your internet connection.';
-                alert('Network Error: ' + e.message);
+            } else if (e.code === 'auth/operation-not-supported-in-this-environment') {
+                errMsg = 'Google login not supported in this browser/environment!';
             } else {
                 errMsg = 'Error: ' + (e.code || e.message);
             }
-
+            alert('GOOGLE LOGIN ERROR:\n' + errMsg);
             var errEl = document.getElementById('authError');
             if (errEl) errEl.textContent = errMsg;
             if (errMsg) showToastSafe(errMsg, 'info');
@@ -7181,7 +7183,7 @@
             var codeEl = document.getElementById('trQuickJoinCode');
             if (!codeEl) return;
             var code = codeEl.value.trim();
-            if (!code || code.length !== 3) { showToast('Enter a 3-digit room code', 'info'); return; }
+            if (!code || code.length !== 3) { showToast('Thanks For Your Feedback', 'info'); return; }
 
             if (!currentUserId || !db) { showToast('Please login first!', 'info'); return; }
             db.ref('testRooms/' + code).once('value').then(function(snapshot) {
