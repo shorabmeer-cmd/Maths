@@ -1571,20 +1571,70 @@
                 firebase.initializeApp(firebaseConfig);
                 db = firebase.database();
                 auth = firebase.auth();
-                auth.onAuthStateChanged((user) => {
-                    if (user) {
-                        currentUser = user;
-                        currentUserId = user.uid;
-                        loadUserProfile(user.uid);
-                    } else {
-                        showAuthScreen();
+
+                // IMPORTANT: getRedirectResult must resolve BEFORE onAuthStateChanged
+                // This fixes Google login not working (was previously outside onload where auth was undefined)
+                _googleRedirectPending = true;
+                auth.getRedirectResult().then(function(result) {
+                    _googleRedirectPending = false;
+                    if (result && result.user) {
+                        _handleGoogleAuthResult(result);
+                        return; // Don't run onAuthStateChanged, we handled it
                     }
+                    // No redirect result — set up normal auth listener
+                    _startAuthListener();
+                }).catch(function(e) {
+                    _googleRedirectPending = false;
+                    _resetGoogleBtn();
+
+                    var errEl = document.getElementById('authError');
+                    var errMsg = '';
+
+                    if (e.code === 'auth/unauthorized-domain') {
+                        errMsg = 'Google login failed. Add ' + location.hostname + ' in Firebase Console > Auth > Settings > Authorized domains.';
+                    } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+                        errMsg = '';
+                    } else if (e.code === 'auth/access-denied') {
+                        errMsg = 'Google login failed. Access was denied. Please check your domain permissions and try again.';
+                    } else if (e.code === 'auth/invalid-credential') {
+                        errMsg = 'Google login failed. Invalid credentials. Please try again.';
+                    } else {
+                        errMsg = 'Google login failed. Please check your domain access and try again.';
+                        console.error('Redirect auth error:', e.code, e.message);
+                    }
+
+                    if (errEl) errEl.textContent = errMsg;
+                    if (errMsg) {
+                        showToast(errMsg, 'info');
+                        var authScr = document.getElementById('authScreen');
+                        if (authScr) authScr.classList.remove('hidden');
+                    }
+
+                    // Even on error, start the auth listener for non-Google users
+                    _startAuthListener();
                 });
             } catch(e) {
                 console.log('Firebase error:', e);
                 showAuthScreen();
             }
         };
+
+        function _startAuthListener() {
+            auth.onAuthStateChanged((user) => {
+                if (user) {
+                    currentUser = user;
+                    currentUserId = user.uid;
+                    loadUserProfile(user.uid);
+                } else {
+                    showAuthScreen();
+                }
+            });
+        }
+
+        function _resetGoogleBtn() {
+            var btn = document.getElementById('googleLoginBtn');
+            if (btn) { btn.disabled = false; btn.innerHTML = _googleBtnHtml; }
+        }
 
         // ==================== TOAST SYSTEM ====================
         function showToast(message, type = 'info') {
@@ -4678,59 +4728,51 @@
     }
 
     window.handleGoogleLogin = function() {
-        if (typeof auth === 'undefined' || !auth) { showToastSafe('Please wait, initializing...', 'info'); return; }
+        if (typeof auth === 'undefined' || !auth) { showToast('Please wait, initializing...', 'info'); return; }
         var btn = document.getElementById('googleLoginBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="v6-spinner"></span> Connecting...'; }
         var provider = new firebase.auth.GoogleAuthProvider();
         provider.addScope('email');
         provider.addScope('profile');
-        // Use redirect FIRST (avoids popup blocked / "not safe" errors on all platforms)
-        auth.signInWithRedirect(provider);
-    };
 
-    // Handle redirect result on page load
-    // IMPORTANT: getRedirectResult must resolve BEFORE onAuthStateChanged processes the user.
-    // We set a flag to prevent loadUserProfile from showing auth screen prematurely.
-    var _googleRedirectPending = true;
-
-    if (typeof auth !== 'undefined' && auth) {
-        auth.getRedirectResult().then(function(result) {
+        // Try popup first (better UX), fallback to redirect if popup is blocked
+        auth.signInWithPopup(provider).then(function(result) {
             _googleRedirectPending = false;
+            _resetGoogleBtn();
             if (result && result.user) {
-                // Google login succeeded — handle it
                 _handleGoogleAuthResult(result);
             }
-            // If no result, onAuthStateChanged will handle normally
         }).catch(function(e) {
-            _googleRedirectPending = false;
-            var btn = document.getElementById('googleLoginBtn');
-            if (btn) { btn.disabled = false; btn.innerHTML = _googleBtnHtml; }
-
-            var errEl = document.getElementById('authError');
-            var errMsg = '';
-
-            if (e.code === 'auth/unauthorized-domain') {
-                errMsg = 'Google login failed. Add ' + location.hostname + ' in Firebase Console > Auth > Settings > Authorized domains.';
-            } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
-                errMsg = ''; // User cancelled, no error needed
-            } else if (e.code === 'auth/access-denied') {
-                errMsg = 'Google login failed. Access was denied. Please check your domain permissions and try again.';
-            } else if (e.code === 'auth/invalid-credential') {
-                errMsg = 'Google login failed. Invalid credentials. Please try again.';
+            // If popup blocked or failed, try redirect
+            if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+                console.log('Popup failed (' + e.code + '), trying redirect...');
+                auth.signInWithRedirect(provider);
             } else {
-                errMsg = 'Google login failed. Please check your domain access and try again.';
-                console.error('Redirect auth error:', e.code, e.message);
-            }
+                _googleRedirectPending = false;
+                _resetGoogleBtn();
 
-            if (errEl) errEl.textContent = errMsg;
-            if (errMsg) {
-                showToastSafe(errMsg, 'info');
-                // Make sure auth screen is visible
-                var authScr = document.getElementById('authScreen');
-                if (authScr) authScr.classList.remove('hidden');
+                var errEl = document.getElementById('authError');
+                var errMsg = '';
+
+                if (e.code === 'auth/unauthorized-domain') {
+                    errMsg = 'Google login failed. Add ' + location.hostname + ' in Firebase Console > Auth > Settings > Authorized domains.';
+                } else if (e.code === 'auth/access-denied') {
+                    errMsg = 'Google login failed. Access was denied.';
+                } else if (e.code === 'auth/invalid-credential') {
+                    errMsg = 'Google login failed. Invalid credentials.';
+                } else {
+                    errMsg = 'Google login failed. Please try again.';
+                    console.error('Google login error:', e.code, e.message);
+                }
+                if (errEl) errEl.textContent = errMsg;
+                if (errMsg) showToast(errMsg, 'info');
             }
         });
-    }
+    };
+
+    // _googleRedirectPending is now managed inside window.onload (see INITIALIZATION section above)
+    // This variable is declared here as a fallback; window.onload sets it properly after auth is ready.
+    var _googleRedirectPending = true;
 
     // Expose the pending flag so loadUserProfile can check it
     window._isGoogleRedirectPending = function() { return _googleRedirectPending; };
